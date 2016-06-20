@@ -1,5 +1,5 @@
 #
-**Install Elasticsearch,Logstash,Kibana on a single node using Heat template**
+**This Heat template installs Elasticsearch, Logstash and Kibana (ELK) on a single node.**
 #
 ===============================================================================
 
@@ -7,17 +7,17 @@
 **Overview**
 ########
 
-This template will help us in launching an instance with Elasticsearch,logstash and Kibana by specifying the parameters listed below as parameters.
+This template will launch an instance with Elasticsearch, Logstash and Kibana by taking the following as parameters.
 
-**keyname,security group,image,flavor,internal network and public network** have been specified as parameters so that we can choose type of **instance** and also **key pair,security group** and onto which **internal subnet** the instance is to be launched.
+**keyname, security group, image, flavor, internal network and public network**
 
 
-Resources used in the HOT template are **port** and **floating ip**
+Resources used in the HOT template are **port** and **floating ip**.
 
 For the server that we are launching (OS::Nova::Server), we link it to a neutron port resource (type OS::Neutron::Port) and to a floating ip resource (type OS::Neutron::FloatingIP).
 
 
-Port assigned to the server represents a logical switch port and is linked to the default security group to ensure secure access to the instances. The floating ip resources provide external access to instances.
+The port assigned to the server represents a logical switch port and is linked to the default security group to ensure secure access to the instance. The floating ip resources provide external access to the instance.
 
 
 Detailed information on parameters and resource types are available on
@@ -27,8 +27,10 @@ http://docs.openstack.org/developer/heat/template_guide/openstack.html
 
 ==========================================================================
 ########
-**Creating a Stack**
+**Launching the ELK Stack**
 ########
+
+We can obtain the parameter values via the following commands:
 
 public_net = nova net-list | awk '/ ext-net / { print $2 }'
 
@@ -43,12 +45,13 @@ key_name = nova keypair-list | awk '/ ELKkey / { print $2 }'
 image_id = Ubuntu-14.04
 
 
+Finally,
 
 heat stack-create -f elkstack.yml -P "key_name=;securitygroup_id=;image_id=;public_net=;internal_net=;internal_subnet=;" Stackname
 
 ==========================================================================
 ########
-**Verify Stack creation**
+**Verify Stack Creation**
 #########
 
 Verify if the stack was created successfully using:

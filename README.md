@@ -44,7 +44,7 @@ image_id = Ubuntu-14.04
 
 
 
-heat stack-create -f elkinstall.yml -P "key_name=;securitygroup_id=;image_id=;public_net=;internal_net=;internal_subnet=;" Stackname
+heat stack-create -f elkstack.yml -P "key_name=;securitygroup_id=;image_id=;public_net=;internal_net=;internal_subnet=;" Stackname
 
 ==========================================================================
 ########

@@ -30,18 +30,12 @@ parameters:
     type: string
     description: internal network id
 
-  internal_subnet:
-    type: string
-    description: internal subnet id
-
 resources:
   elknode_port:
         type: OS::Neutron::Port
         properties:
           network_id: { get_param: internal_net }
           security_groups: [ get_param: securitygroup_id ]
-          fixed_ips:
-            - subnet_id: { get_param: internal_subnet }
 
   elknode_floating_ip:
         type: OS::Neutron::FloatingIP
@@ -59,113 +53,138 @@ resources:
           admin_user: ubuntu
           networks:
             - port: { get_resource: elknode_port }
-          user_data: |
-            #!/bin/sh
-            
-            sudo add-apt-repository ppa:webupd8team/java -y
-            sudo apt-get update -y
-            echo debconf shared/accepted-oracle-license-v1-1 select true | sudo debconf-set-selections
-            echo debconf shared/accepted-oracle-license-v1-1 seen true | sudo debconf-set-selections
-            sudo apt-get install oracle-java8-installer -y
-            wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
-            wget https://download.elasticsearch.org/elasticsearch/release/org/elasticsearch/distribution/deb/elasticsearch/2.3.3/elasticsearch-2.3.3.deb
-            sudo dpkg -i elasticsearch-2.3.3.deb
-            sed -i "/node\.name/a node.name: `hostname`" /etc/elasticsearch/elasticsearch.yml
-            local_ip=`ifconfig eth0 | grep "inet addr" | cut -d ':' -f 2 | awk '{print $1}'`
-            sed -i "/network\.host/a network.host: $(echo $local_ip)" /etc/elasticsearch/elasticsearch.yml
-            /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
-            sudo service elasticsearch restart
-            sudo update-rc.d elasticsearch defaults 95 10
-            
-            echo "deb http://packages.elastic.co/kibana/4.5/debian stable main"  | sudo tee -a /etc/apt/sources.list.d/kibana-4.5.list
-            sudo apt-get update -y
-            sudo apt-get -y install kibana
-            sed -i "/^# elasticsearch.url:/a elasticsearch.url: \"http://$(echo $local_ip):9200\"" /opt/kibana/config/kibana.yml
-            sudo service kibana start
-            sudo update-rc.d kibana defaults 96 9
-            
-            sudo apt-get install -y nginx apache2-utils
-            sudo htpasswd -c /etc/nginx/htpasswd.users kibanaadmin
-            cat >/etc/nginx/sites-available/default <<EOF
-            server {
-            listen 80;
-
-            server_name `hostname`;
-
-            auth_basic "Restricted Access";
-            auth_basic_user_file /etc/nginx/htpasswd.users;
-
-            location / {
-            proxy_pass http://localhost:5601;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection 'upgrade';
-            proxy_set_header Host \$host;
-            proxy_cache_bypass \$http_upgrade;        
-            }
-            }
-            EOF
-            sudo service nginx restart
-            
-            sudo mkdir -p /etc/pki/tls/certs  /etc/pki/tls/private
-            sed -i "/\[ v3_ca \]/a subjectAltName = IP: $(echo $local_ip)" /etc/ssl/openssl.cnf
-            cd /etc/pki/tls
-            sudo openssl req -config /etc/ssl/openssl.cnf -x509 -days 3650 -batch -nodes -newkey rsa:2048 -keyout private/logstash-forwarder.key -out certs/logstash-forwarder.crt
-            
-            
-            echo "deb https://packages.elastic.co/logstash/2.3/debian stable main" | sudo tee -a /etc/apt/sources.list/logstash-2.3.list
-            sudo apt-get update -y
-            sudo apt-get install logstash -y
-            
-            cat > /etc/logstash/conf.d/02-beats-input.conf <<EOF
-            input {
-            beats {
+          user_data: {get_resource: elknode_mime }
+          user_data_format: RAW
+          
+  elknode_mime:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: elk_install_ubuntu_linux }
+          subtype: "x-shellscript"
+          
+  elk_install_ubuntu_linux:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config: |
+        #!/usr/bin/env bash
+        ifconfig eth0 mtu 1500 ## Optionally patch the MTU
+        # Update host configuration
+        sudo bash -c "echo 'elknode' > /etc/hostname"
+        ip=`ifconfig eth0 | grep "inet addr" | cut -d ':' -f 2 | awk '{print $1}'`
+        sudo bash -c 'cat > /etc/hosts' <<EOF
+        127.0.0.1         localhost
+        $ip               elknode
+        EOF
+        sudo hostname elknode
+        
+        # install curl
+        if command -V apt-get && ! command -V curl; then apt-get -y install curl; fi
+        
+        sudo add-apt-repository ppa:webupd8team/java -y
+        sudo apt-get update -y
+        echo debconf shared/accepted-oracle-license-v1-1 select true | sudo debconf-set-selections
+        echo debconf shared/accepted-oracle-license-v1-1 seen true | sudo debconf-set-selections
+        sudo apt-get install oracle-java8-installer -y
+        wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+        wget https://download.elasticsearch.org/elasticsearch/release/org/elasticsearch/distribution/deb/elasticsearch/2.3.3/elasticsearch-2.3.3.deb
+        sudo dpkg -i elasticsearch-2.3.3.deb
+        sed -i "/node\.name/a node.name: `hostname`" /etc/elasticsearch/elasticsearch.yml
+        local_ip=`ifconfig eth0 | grep "inet addr" | cut -d ':' -f 2 | awk '{print $1}'`
+        sed -i "/network\.host/a network.host: $(echo $local_ip)" /etc/elasticsearch/elasticsearch.yml
+        /usr/share/elasticsearch/bin/plugin install mobz/elasticsearch-head
+        sudo service elasticsearch restart
+        sudo update-rc.d elasticsearch defaults 95 10
+        
+        echo "deb http://packages.elastic.co/kibana/4.5/debian stable main"  | sudo tee -a /etc/apt/sources.list.d/kibana-4.5.list
+        sudo apt-get update -y
+        sudo apt-get -y install kibana
+        sed -i "/^# elasticsearch.url:/a elasticsearch.url: \"http://$(echo $local_ip):9200\"" /opt/kibana/config/kibana.yml
+        sudo service kibana start
+        sudo update-rc.d kibana defaults 96 9
+        
+        sudo apt-get install -y nginx apache2-utils
+        sudo htpasswd -c /etc/nginx/htpasswd.users kibanaadmin
+        cat >/etc/nginx/sites-available/default <<EOF
+        server {
+        listen 80;
+  
+        server_name `hostname`;
+  
+        auth_basic "Restricted Access";
+        auth_basic_user_file /etc/nginx/htpasswd.users;
+  
+        location / {
+        proxy_pass http://localhost:5601;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;        
+        }
+        }
+        EOF
+        sudo service nginx restart
+        
+        sudo mkdir -p /etc/pki/tls/certs  /etc/pki/tls/private
+        sed -i "/\[ v3_ca \]/a subjectAltName = IP: $(echo $local_ip)" /etc/ssl/openssl.cnf
+        cd /etc/pki/tls
+        sudo openssl req -config /etc/ssl/openssl.cnf -x509 -days 3650 -batch -nodes -newkey rsa:2048 -keyout private/logstash-forwarder.key -out certs/logstash-forwarder.crt
+        
+        echo "deb http://packages.elasticsearch.org/logstash/2.3/debian stable main" | sudo tee -a /etc/apt/sources.list.d/logstash-2.3.list
+        sudo apt-get update -qqy
+        sudo apt-get install logstash -qqy
+        
+        cat > /etc/logstash/conf.d/02-beats-input.conf <<EOF
+        input {
+          beats {
             port => 5044
             ssl => true
             ssl_certificate => "/etc/pki/tls/certs/logstash-forwarder.crt"
             ssl_key => "/etc/pki/tls/private/logstash-forwarder.key"
-            }
-            }
-            EOF
-             
-            cat > /etc/logstash/conf.d/10-syslog-filter.conf <<EOF
-            filter {
-            if [type] == "syslog" {
+          }
+        }
+        EOF
+         
+        cat > /etc/logstash/conf.d/10-syslog-filter.conf <<EOF
+        filter {
+          if [type] == "syslog" {
             grok {
-            match => { "message" => "%{SYSLOGTIMESTAMP:syslog_timestamp} %{SYSLOGHOST:syslog_hostname} %{DATA:syslog_program}(?:\[%{POSINT:syslog_pid}\])?: %{GREEDYDATA:syslog_message}" }
-            add_field => [ "received_at", "%{@timestamp}" ]
-            add_field => [ "received_from", "%{host}" ]
+              match => { "message" => "%{SYSLOGTIMESTAMP:syslog_timestamp} %{SYSLOGHOST:syslog_hostname} %{DATA:syslog_program}(?:\[%{POSINT:syslog_pid}\])?: %{GREEDYDATA:syslog_message}" }
+              add_field => [ "received_at", "%{@timestamp}" ]
+              add_field => [ "received_from", "%{host}" ]
             }
             syslog_pri { }
             date {
-            match => [ "syslog_timestamp", "MMM  d HH:mm:ss", "MMM dd HH:mm:ss" ]
+              match => [ "syslog_timestamp", "MMM  d HH:mm:ss", "MMM dd HH:mm:ss" ]
             }
-            }
-            }
-            EOF
-            
-            cat > /etc/logstash/conf.d/30-elasticsearch-output.conf <<EOF
-            output {
-            elasticsearch {
-            hosts => ["localhost:9200"]
+          }
+        }
+        EOF
+        
+        cat > /etc/logstash/conf.d/30-elasticsearch-output.conf <<EOF
+        output {
+          elasticsearch {
+            hosts => ["$local_ip:9200"]
             sniffing => true
             manage_template => false
             index => "%{[@metadata][beat]}-%{+YYYY.MM.dd}"
             document_type => "%{[@metadata][type]}"
-            }
-            }
-            EOF
-
-            sudo service logstash restart
-            sudo update-rc.d logstash defaults 96 9
-
-            cd /tmp
-            curl -L -O https://download.elastic.co/beats/dashboards/beats-dashboards-1.2.3.zip
-            sudo apt-get -y install unzip
-            unzip beats-dashboards-1.2.3.zip
-            cd beats-dashboards-1.2.3
-            sudo ./load.sh
-          user_data_format: RAW
+          }
+          stdout { codec => rubydebug }
+        }
+        EOF
+  
+        sudo service logstash restart
+        sudo update-rc.d logstash defaults 96 9
+  
+        cd /tmp
+        curl -L -O https://download.elastic.co/beats/dashboards/beats-dashboards-1.2.3.zip
+        sudo apt-get -y install unzip
+        unzip beats-dashboards-1.2.3.zip
+        cd beats-dashboards-1.2.3
+        sed -i "s|ELASTICSEARCH=http\://localhost\:9200|ELASTICSEARCH=http\://$local_ip\:9200|g" ./load.sh
+        sudo ./load.sh
 
 outputs:
   ELKnode_private_ip:
